@@ -1,4 +1,3 @@
-pip install google-auth
 import os
 import streamlit as st
 import google.oauth2 import service_account
