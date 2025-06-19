@@ -1,0 +1,16 @@
+# Python cache and compiled files
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+
+# Credentials and API keys
+credentials.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# PDF downloads (optional, if you generate them at runtime)
+downloads/
