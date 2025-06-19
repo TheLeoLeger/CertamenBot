@@ -1,110 +1,31 @@
 import os
-import io
 import json
-import asyncio
-from typing import List
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-
+import io
+from flask import Flask, request, jsonify, render_template_string
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 from PyPDF2 import PdfReader
-
 import openai
-from dotenv import load_dotenv
 
-load_dotenv()  # loads OPENAI_API_KEY from .env if present
-openai.api_key = os.getenv("OPENAI_API_KEY")
+app = Flask(__name__)
 
-SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-SERVICE_ACCOUNT_FILE = "credentials.json"  # Put your Google Service Account JSON here
+# Load Google credentials JSON from env var
+creds_json_str = os.getenv("GOOGLE_CREDENTIALS")
+if not creds_json_str:
+    raise Exception("Missing GOOGLE_CREDENTIALS environment variable")
+creds_dict = json.loads(creds_json_str)
+credentials = service_account.Credentials.from_service_account_info(creds_dict)
 
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
-)
-
-# Authenticate with Google Drive API
-credentials = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES
-)
 drive_service = build('drive', 'v3', credentials=credentials)
 
-# Helper: List all PDF files in Drive folder (replace FOLDER_ID below)
-FOLDER_ID = "your-google-drive-folder-id-here"  # <-- Replace this with your Drive folder ID
+openai.api_key = os.getenv("OPENAI_API_KEY")
+if not openai.api_key:
+    raise Exception("Missing OPENAI_API_KEY environment variable")
 
-def list_pdfs_in_folder(folder_id: str) -> List[dict]:
-    query = f"'{folder_id}' in parents and mimeType='application/pdf' and trashed=false"
-    results = drive_service.files().list(q=query, pageSize=100, fields="files(id, name)").execute()
-    return results.get('files', [])
-
-# Helper: Download a PDF file content by file ID
-def download_pdf(file_id: str) -> bytes:
-    request = drive_service.files().get_media(fileId=file_id)
-    fh = io.BytesIO()
-    downloader = googleapiclient.http.MediaIoBaseDownload(fh, request)
-    done = False
-    while done is False:
-        status, done = downloader.next_chunk()
-    fh.seek(0)
-    return fh.read()
-
-# Extract text from PDF bytes
-def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    text = []
-    for page in reader.pages:
-        text.append(page.extract_text())
-    return "\n".join(text)
-
-# Embeddings storage (in-memory cache for demo)
-embeddings_cache = []
-
-# Create embedding vector using OpenAI
-def get_embedding(text: str):
-    response = openai.Embedding.create(model="text-embedding-3-large", input=text)
-    return response['data'][0]['embedding']
-
-# Simple cosine similarity
-def cosine_sim(a, b):
-    import numpy as np
-    a = np.array(a)
-    b = np.array(b)
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
-
-# Load all PDFs from Drive, extract text, embed, and cache embeddings
-def load_and_cache_embeddings():
-    global embeddings_cache
-    embeddings_cache = []
-    pdf_files = list_pdfs_in_folder(FOLDER_ID)
-    print(f"Found {len(pdf_files)} PDFs in Google Drive folder.")
-    for f in pdf_files:
-        print(f"Downloading {f['name']}...")
-        pdf_bytes = download_pdf(f['id'])
-        text = extract_text_from_pdf_bytes(pdf_bytes)
-        embedding = get_embedding(text[:2000])  # limit text size for embedding
-        embeddings_cache.append({"name": f["name"], "text": text, "embedding": embedding})
-    print("All PDFs loaded and embedded.")
-
-# Call once on startup (you can also do periodic refresh or manual trigger)
-load_and_cache_embeddings()
-
-# Find best matching PDF text for question
-def find_best_answer(question: str) -> str:
-    q_emb = get_embedding(question)
-    best_score = -1
-    best_text = "Sorry, I couldn't find an answer."
-    for doc in embeddings_cache:
-        score = cosine_sim(q_emb, doc['embedding'])
-        if score > best_score:
-            best_score = score
-            best_text = doc['text'][:1000]  # return first 1000 chars as snippet
-    return best_text
-
-# FastAPI routes and UI
+PDF_FOLDER_ID = os.getenv("PDF_FOLDER_ID")
+if not PDF_FOLDER_ID:
+    raise Exception("Missing PDF_FOLDER_ID environment variable")
 
 HTML = """
 <!DOCTYPE html>
@@ -112,112 +33,198 @@ HTML = """
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>CertamenBot Chat</title>
+<title>AI PDF Chatbot</title>
 <style>
   body {
-    margin: 0; padding: 0; background: #202123; color: white;
+    background: #121212;
+    color: #eee;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    display: flex; flex-direction: column; height: 100vh;
+    margin: 0; padding: 0; height: 100vh;
+    display: flex; flex-direction: column;
+  }
+  header {
+    background: #1f1f1f;
+    padding: 1rem;
+    text-align: center;
+    font-size: 1.5rem;
+    font-weight: bold;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid #333;
   }
   #chat {
-    flex-grow: 1; overflow-y: auto; padding: 20px;
-    display: flex; flex-direction: column; gap: 12px;
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
   }
-  .bubble {
-    max-width: 70%; padding: 12px 18px; border-radius: 18px;
-    line-height: 1.4; font-size: 16px;
+  .message {
+    max-width: 70%;
+    padding: 0.8rem 1rem;
+    border-radius: 1rem;
+    line-height: 1.4;
   }
-  .user { background: #10a37f; align-self: flex-end; border-radius: 18px 18px 0 18px; }
-  .bot { background: #444654; align-self: flex-start; border-radius: 18px 18px 18px 0; }
-  #input-area {
-    display: flex; padding: 10px; background: #343541;
+  .user {
+    background: #4a90e2;
+    align-self: flex-end;
+    color: white;
+    border-bottom-right-radius: 0;
   }
-  #input-area input {
-    flex-grow: 1; border-radius: 18px; border: none; padding: 12px 20px;
-    font-size: 16px; outline: none;
+  .bot {
+    background: #2a2a2a;
+    align-self: flex-start;
+    color: #ddd;
+    border-bottom-left-radius: 0;
   }
-  #input-area button {
-    margin-left: 10px; background: #10a37f; border: none; border-radius: 18px;
-    color: white; font-weight: bold; padding: 0 20px; cursor: pointer;
-    font-size: 16px;
+  form {
+    display: flex;
+    padding: 1rem;
+    background: #1f1f1f;
+    border-top: 1px solid #333;
+  }
+  input[type=text] {
+    flex-grow: 1;
+    padding: 0.75rem 1rem;
+    border-radius: 1rem;
+    border: none;
+    outline: none;
+    font-size: 1rem;
+    background: #333;
+    color: #eee;
+  }
+  button {
+    margin-left: 0.75rem;
+    padding: 0.75rem 1.5rem;
+    border-radius: 1rem;
+    border: none;
+    background: #4a90e2;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.3s;
+  }
+  button:hover {
+    background: #357ABD;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #4a90e2;
+    border-radius: 4px;
   }
 </style>
 </head>
 <body>
-
-<div id="chat">
-  <div class="bubble bot">Hello! Ask me anything about the sourcebooks.</div>
-</div>
-
-<div id="input-area">
-  <input type="text" id="userInput" placeholder="Type your question here..." autocomplete="off"/>
-  <button onclick="sendQuestion()">Send</button>
-</div>
-
+<header>AI PDF Chatbot</header>
+<div id="chat"></div>
+<form id="form">
+  <input id="input" autocomplete="off" placeholder="Ask me anything about the PDFs..." />
+  <button>Send</button>
+</form>
 <script>
   const chat = document.getElementById('chat');
-  const input = document.getElementById('userInput');
+  const form = document.getElementById('form');
+  const input = document.getElementById('input');
 
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') sendQuestion();
-  });
-
-  async function sendQuestion() {
-    let question = input.value.trim();
-    if (!question) return;
-    appendMessage(question, 'user');
-    input.value = '';
-    appendMessage('...', 'bot');
-
-    try {
-      const res = await fetch('/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question })
-      });
-      const data = await res.json();
-      removeLastBotMessage();
-      appendMessage(data.answer || 'Sorry, no answer.', 'bot');
-      chat.scrollTop = chat.scrollHeight;
-    } catch (err) {
-      removeLastBotMessage();
-      appendMessage('Error: ' + err.message, 'bot');
-    }
-  }
-
-  function appendMessage(text, sender) {
-    const div = document.createElement('div');
-    div.classList.add('bubble', sender);
-    div.textContent = text;
-    chat.appendChild(div);
+  function addMessage(text, sender) {
+    const msg = document.createElement('div');
+    msg.classList.add('message', sender);
+    msg.textContent = text;
+    chat.appendChild(msg);
     chat.scrollTop = chat.scrollHeight;
   }
 
-  function removeLastBotMessage() {
-    const bubbles = chat.querySelectorAll('.bot');
-    if (bubbles.length > 0) {
-      const last = bubbles[bubbles.length - 1];
-      if (last.textContent === '...') last.remove();
-    }
-  }
-</script>
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const question = input.value.trim();
+    if (!question) return;
+    addMessage(question, 'user');
+    input.value = '';
+    addMessage('Thinking...', 'bot');
 
+    try {
+      const res = await fetch('/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({question})
+      });
+      const data = await res.json();
+      chat.lastChild.textContent = data.answer || "Sorry, I didn't get that.";
+    } catch {
+      chat.lastChild.textContent = "Error connecting to server.";
+    }
+  });
+</script>
 </body>
 </html>
 """
 
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    return HTML
+def list_pdfs(folder_id):
+    query = f"'{folder_id}' in parents and mimeType='application/pdf' and trashed = false"
+    response = drive_service.files().list(q=query, fields="files(id, name)").execute()
+    return response.get('files', [])
 
-@app.post("/ask")
-async def ask(request: Request):
-    data = await request.json()
-    question = data.get("question", "")
-    answer = find_best_answer(question)
-    return JSONResponse({"answer": answer})
+def download_pdf(file_id):
+    request = drive_service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+    fh.seek(0)
+    return fh
 
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+def extract_text(pdf_filelike):
+    reader = PdfReader(pdf_filelike)
+    text_chunks = []
+    for page in reader.pages:
+        text = page.extract_text()
+        if text:
+            text_chunks.append(text)
+    return "\n".join(text_chunks)
+
+def ask_openai(prompt):
+    response = openai.ChatCompletion.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant answering questions based on documents."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.2,
+        max_tokens=500,
+    )
+    return response.choices[0].message.content.strip()
+
+@app.route('/')
+def home():
+    return render_template_string(HTML)
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    data = request.get_json(force=True)
+    question = data.get("question", "").strip()
+    if not question:
+        return jsonify({"answer": "Please ask a question."})
+
+    try:
+        pdf_files = list_pdfs(PDF_FOLDER_ID)
+        if not pdf_files:
+            return jsonify({"answer": "No PDFs found in your Google Drive folder."})
+
+        combined_text = ""
+        for pdf in pdf_files:
+            file_content = download_pdf(pdf['id'])
+            combined_text += extract_text(file_content) + "\n---\n"
+
+        prompt = f"Use the following documents to answer the question.\n\nDocuments:\n{combined_text}\n\nQuestion: {question}\nAnswer:"
+        answer = ask_openai(prompt)
+        return jsonify({"answer": answer})
+
+    except Exception as e:
+        return jsonify({"answer": f"Error: {str(e)}"})
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
