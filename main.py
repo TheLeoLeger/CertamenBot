@@ -16,7 +16,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-openai.api_key = os.environ.get("OPENAI_API_KEY")
+openai.api_key = os.getenv("OPENAI_API_KEY"
 
 pdf_text_storage = {}
 
