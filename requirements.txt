@@ -4,3 +4,4 @@ pdfplumber
 openai
 python-multipart
 numpy
+PyPDF2
