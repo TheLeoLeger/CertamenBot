@@ -1,6 +1,6 @@
 import os
 import streamlit as st
-import google.oauth2 import service_account
+import google.oauth2.service_account
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
