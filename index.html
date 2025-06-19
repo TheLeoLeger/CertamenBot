@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Simple Chatbot</title>
+</head>
+<body>
+  <h1>Chatbot</h1>
+  <div id="chatbox" style="border:1px solid #ccc; padding:10px; height:300px; overflow-y:auto;"></div>
+  <input type="text" id="userInput" placeholder="Type a message..." style="width:80%">
+  <button onclick="sendMessage()">Send</button>
+
+  <script>
+    async function sendMessage() {
+      const input = document.getElementById('userInput');
+      const message = input.value;
+      if (!message) return;
+
+      const chatbox = document.getElementById('chatbox');
+      chatbox.innerHTML += `<p><b>You:</b> ${message}</p>`;
+      input.value = '';
+
+      // Call backend API at /chat
+      const response = await fetch('/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message})
+      });
+      const data = await response.json();
+
+      chatbox.innerHTML += `<p><b>Bot:</b> ${data.reply}</p>`;
+      chatbox.scrollTop = chatbox.scrollHeight;
+    }
+  </script>
+</body>
+</html>
