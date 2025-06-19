@@ -5,6 +5,22 @@ from fastapi.staticfiles import StaticFiles
 import PyPDF2
 import openai
 import numpy as np
+import json
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+
+# Load credentials JSON string from environment variable
+creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+
+if not creds_json:
+    raise Exception("Missing GOOGLE_CREDENTIALS_JSON environment variable")
+
+creds_dict = json.loads(creds_json)
+credentials = Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/drive.readonly"])
+
+service = build('drive', 'v3', credentials=credentials)
+
+# Now you can use `service` to interact with Google Drive
 
 app = FastAPI()
 
