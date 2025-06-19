@@ -1,230 +1,122 @@
 import os
-import json
-import io
-from flask import Flask, request, jsonify, render_template_string
-from google.oauth2 import service_account
+import streamlit as st
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from io import BytesIO
+import base64
 from PyPDF2 import PdfReader
-import openai
+from langchain.vectorstores import FAISS
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.text_splitter import CharacterTextSplitter
+from langchain.chains.question_answering import load_qa_chain
+from langchain.chat_models import ChatOpenAI
+from langchain.docstore.document import Document
 
-app = Flask(__name__)
+# ENV VARS
+CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-# Load Google credentials JSON from env var
-creds_json_str = os.getenv("GOOGLE_CREDENTIALS")
-if not creds_json_str:
-    raise Exception("Missing GOOGLE_CREDENTIALS environment variable")
-creds_dict = json.loads(creds_json_str)
-credentials = service_account.Credentials.from_service_account_info(creds_dict)
+SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
-drive_service = build('drive', 'v3', credentials=credentials)
-
-openai.api_key = os.getenv("OPENAI_API_KEY")
-if not openai.api_key:
-    raise Exception("Missing OPENAI_API_KEY environment variable")
-
-PDF_FOLDER_ID = os.getenv("PDF_FOLDER_ID")
-if not PDF_FOLDER_ID:
-    raise Exception("Missing PDF_FOLDER_ID environment variable")
-
-HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>AI PDF Chatbot</title>
-<style>
-  body {
-    background: #121212;
-    color: #eee;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    margin: 0; padding: 0; height: 100vh;
-    display: flex; flex-direction: column;
-  }
-  header {
-    background: #1f1f1f;
-    padding: 1rem;
-    text-align: center;
-    font-size: 1.5rem;
-    font-weight: bold;
-    letter-spacing: 0.05em;
-    border-bottom: 1px solid #333;
-  }
-  #chat {
-    flex-grow: 1;
-    overflow-y: auto;
-    padding: 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-  .message {
-    max-width: 70%;
-    padding: 0.8rem 1rem;
-    border-radius: 1rem;
-    line-height: 1.4;
-  }
-  .user {
-    background: #4a90e2;
-    align-self: flex-end;
-    color: white;
-    border-bottom-right-radius: 0;
-  }
-  .bot {
-    background: #2a2a2a;
-    align-self: flex-start;
-    color: #ddd;
-    border-bottom-left-radius: 0;
-  }
-  form {
-    display: flex;
-    padding: 1rem;
-    background: #1f1f1f;
-    border-top: 1px solid #333;
-  }
-  input[type=text] {
-    flex-grow: 1;
-    padding: 0.75rem 1rem;
-    border-radius: 1rem;
-    border: none;
-    outline: none;
-    font-size: 1rem;
-    background: #333;
-    color: #eee;
-  }
-  button {
-    margin-left: 0.75rem;
-    padding: 0.75rem 1.5rem;
-    border-radius: 1rem;
-    border: none;
-    background: #4a90e2;
-    color: white;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.3s;
-  }
-  button:hover {
-    background: #357ABD;
-  }
-  ::-webkit-scrollbar {
-    width: 8px;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #4a90e2;
-    border-radius: 4px;
-  }
-</style>
-</head>
-<body>
-<header>AI PDF Chatbot</header>
-<div id="chat"></div>
-<form id="form">
-  <input id="input" autocomplete="off" placeholder="Ask me anything about the PDFs..." />
-  <button>Send</button>
-</form>
-<script>
-  const chat = document.getElementById('chat');
-  const form = document.getElementById('form');
-  const input = document.getElementById('input');
-
-  function addMessage(text, sender) {
-    const msg = document.createElement('div');
-    msg.classList.add('message', sender);
-    msg.textContent = text;
-    chat.appendChild(msg);
-    chat.scrollTop = chat.scrollHeight;
-  }
-
-  form.addEventListener('submit', async e => {
-    e.preventDefault();
-    const question = input.value.trim();
-    if (!question) return;
-    addMessage(question, 'user');
-    input.value = '';
-    addMessage('Thinking...', 'bot');
-
-    try {
-      const res = await fetch('/chat', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({question})
-      });
-      const data = await res.json();
-      chat.lastChild.textContent = data.answer || "Sorry, I didn't get that.";
-    } catch {
-      chat.lastChild.textContent = "Error connecting to server.";
+# Cool UI
+st.set_page_config(page_title="🧙 D&D Sourcebook AI", layout="centered")
+st.markdown("""
+    <style>
+    .user-bubble {
+        background-color: #dcf8c6;
+        padding: 12px;
+        border-radius: 20px;
+        margin: 10px 0;
+        width: fit-content;
     }
-  });
-</script>
-</body>
-</html>
-"""
+    .ai-bubble {
+        background-color: #ececec;
+        padding: 12px;
+        border-radius: 20px;
+        margin: 10px 0;
+        width: fit-content;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-def list_pdfs(folder_id):
-    query = f"'{folder_id}' in parents and mimeType='application/pdf' and trashed = false"
-    response = drive_service.files().list(q=query, fields="files(id, name)").execute()
-    return response.get('files', [])
+st.title("🧙 Ask your D&D Sourcebooks")
 
-def download_pdf(file_id):
-    request = drive_service.files().get_media(fileId=file_id)
-    fh = io.BytesIO()
-    downloader = MediaIoBaseDownload(fh, request)
-    done = False
-    while not done:
-        status, done = downloader.next_chunk()
-    fh.seek(0)
-    return fh
 
-def extract_text(pdf_filelike):
-    reader = PdfReader(pdf_filelike)
-    text_chunks = []
-    for page in reader.pages:
-        text = page.extract_text()
-        if text:
-            text_chunks.append(text)
-    return "\n".join(text_chunks)
+@st.cache_resource
+def authenticate_drive():
+    creds = None
+    # Decode credentials.json from env
+    with open("credentials.json", "w") as f:
+        f.write(base64.b64decode(CREDENTIALS_JSON).decode())
 
-def ask_openai(prompt):
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant answering questions based on documents."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.2,
-        max_tokens=500,
-    )
-    return response.choices[0].message.content.strip()
+    flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+    creds = flow.run_local_server(port=0)
+    service = build('drive', 'v3', credentials=creds)
+    return service
 
-@app.route('/')
-def home():
-    return render_template_string(HTML)
 
-@app.route('/chat', methods=['POST'])
-def chat():
-    data = request.get_json(force=True)
-    question = data.get("question", "").strip()
-    if not question:
-        return jsonify({"answer": "Please ask a question."})
+@st.cache_data
+def load_sourcebooks(service):
+    results = service.files().list(q="mimeType='application/pdf'",
+                                   pageSize=10,
+                                   fields="files(id, name)").execute()
+    files = results.get('files', [])
+    texts = []
 
-    try:
-        pdf_files = list_pdfs(PDF_FOLDER_ID)
-        if not pdf_files:
-            return jsonify({"answer": "No PDFs found in your Google Drive folder."})
+    for file in files:
+        pdf_id = file['id']
+        pdf_name = file['name']
+        request = service.files().get_media(fileId=pdf_id)
+        fh = BytesIO()
+        downloader = request.execute()
+        fh.write(downloader)
+        fh.seek(0)
 
-        combined_text = ""
-        for pdf in pdf_files:
-            file_content = download_pdf(pdf['id'])
-            combined_text += extract_text(file_content) + "\n---\n"
+        pdf_reader = PdfReader(fh)
+        for page in pdf_reader.pages:
+            texts.append(page.extract_text())
 
-        prompt = f"Use the following documents to answer the question.\n\nDocuments:\n{combined_text}\n\nQuestion: {question}\nAnswer:"
-        answer = ask_openai(prompt)
-        return jsonify({"answer": answer})
+    return "\n".join(texts)
 
-    except Exception as e:
-        return jsonify({"answer": f"Error: {str(e)}"})
 
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+@st.cache_resource
+def create_vectorstore(text):
+    text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    chunks = text_splitter.split_text(text)
+    docs = [Document(page_content=chunk) for chunk in chunks]
+
+    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    return FAISS.from_documents(docs, embeddings)
+
+
+def ask_question(vectorstore, query):
+    llm = ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY)
+    chain = load_qa_chain(llm, chain_type="stuff")
+    docs = vectorstore.similarity_search(query)
+    return chain.run(input_documents=docs, question=query)
+
+
+# App Logic
+if 'vectorstore' not in st.session_state:
+    with st.spinner("🔐 Authenticating with Google Drive..."):
+        drive_service = authenticate_drive()
+
+    with st.spinner("📚 Loading sourcebooks from Drive..."):
+        combined_text = load_sourcebooks(drive_service)
+
+    with st.spinner("🧠 Building vector database..."):
+        vs = create_vectorstore(combined_text)
+        st.session_state.vectorstore = vs
+
+prompt = st.chat_input("Ask me something about your sourcebooks!")
+
+if prompt:
+    with st.chat_message("user"):
+        st.markdown(f"<div class='user-bubble'>{prompt}</div>", unsafe_allow_html=True)
+
+    with st.spinner("🧠 Thinking..."):
+        answer = ask_question(st.session_state.vectorstore, prompt)
+
+    with st.chat_message("assistant"):
+        st.markdown(f"<div class='ai-bubble'>{answer}</div>", unsafe_allow_html=True)
