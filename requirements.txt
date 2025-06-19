@@ -16,3 +16,4 @@ gunicorn
 streamlit
 langchain
 faiss-cpu
+langchain-community
