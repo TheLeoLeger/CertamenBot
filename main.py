@@ -7,7 +7,16 @@ import os
 import io
 
 app = FastAPI()
+from pydantic import BaseModel
 
+class ChatRequest(BaseModel):
+    message: str
+
+@app.post("/chat")
+async def chat_endpoint(request: ChatRequest):
+    user_message = request.message
+    reply = f"You said: {user_message}"  # Simple echo bot for now
+    return {"reply": reply}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # for testing only; restrict in production
