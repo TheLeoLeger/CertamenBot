@@ -12,6 +12,7 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain.chains.question_answering import load_qa_chain
 from langchain.chat_models import ChatOpenAI
 from langchain.docstore.document import Document
+from langchain_community.vectorstores
 
 # ENV VARS
 CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS")
