@@ -12,16 +12,21 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain.chains.question_answering import load_qa_chain
 from langchain.chat_models import ChatOpenAI
 from langchain.docstore.document import Document
-
-
+import json
+def authenticate_drive():
+    credentials_json = os.getenv("GOOGLE_CREDENTIALS")
+    credentials_dict = json.loads(credentials_json)
+    creds = service_account.Credentials.from_service_account_info(credentials_dict)
+    return build('drive', 'v3', credentials=creds)
 # ENV VARS
 CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-
+credentials_info = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+creds = service_account.Credentials.from_service_account_info(credentials_info)
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
 # Cool UI
-st.set_page_config(page_title="🧙 D&D Sourcebook AI", layout="centered")
+st.set_page_config(page_title="Certamen Sourcebook AI", layout="centered")
 st.markdown("""
     <style>
     .user-bubble {
@@ -41,20 +46,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🧙 Ask your D&D Sourcebooks")
+st.title(" Ask your Certamen Sourcebooks")
 
-
-@st.cache_resource
-def authenticate_drive():
-    creds = None
-    # Decode credentials.json from env
-    with open("credentials.json", "w") as f:
-        f.write(base64.b64decode(CREDENTIALS_JSON).decode())
-
-    flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
-    creds = flow.run_local_server(port=0)
-    service = build('drive', 'v3', credentials=creds)
-    return service
+ 
 
 
 @st.cache_data
