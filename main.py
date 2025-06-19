@@ -11,7 +11,10 @@ app = FastAPI()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # 1. Load and extract text from your PDFs here (put your PDF filenames in this list)
-pdf_files = ["sourcebook1.pdf", "sourcebook2.pdf"]  # change to your actual filenames
+import os
+
+pdf_folder = "sourcebooks"
+pdf_files = [os.path.join(pdf_folder, f) for f in os.listdir(pdf_folder) if f.endswith(".pdf")]
 
 print("Loading PDFs and extracting text...")
 all_text = ""
