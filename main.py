@@ -17,6 +17,14 @@ async def chat_endpoint(request: ChatRequest):
     user_message = request.message
     reply = f"You said: {user_message}"  # Simple echo bot for now
     return {"reply": reply}
+from fastapi.responses import FileResponse
+import os
+
+@app.get("/")
+async def serve_frontend():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "index.html"))
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # for testing only; restrict in production
