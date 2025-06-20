@@ -1,11 +1,19 @@
 services:
   - type: web
-    name: certamen-sourcebook-ai
-    env: python
+    name: certamen-ai
+    runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: streamlit run main.py
-    packages:
-      - poppler-utils
-      - tesseract-ocr
-      - tesseract-ocr-eng
+    envVars:
+      - key: GOOGLE_CREDENTIALS
+        sync: true
+      - key: OPENAI_API_KEY
+        sync: true
+      - key: PDF_FOLDER_ID
+        sync: true
+
+build:
+  packages:
+    - poppler-utils
+    - tesseract-ocr
