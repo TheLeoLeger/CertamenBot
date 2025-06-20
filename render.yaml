@@ -2,12 +2,15 @@ services:
   - type: web
     name: ai-pdf-chat
     env: python
-    region: oregon
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run main.py
-    envVars:
+    plan: starter
+    env_vars:
       - key: OPENAI_API_KEY
-        fromSecret: OPENAI_API_KEY
-      - key: GOOGLE_CREDENTIALS_JSON
-        fromSecret: GOOGLE_CREDENTIALS_JSON
+        from_secret: OPENAI_API_KEY
+      - key: GOOGLE_CREDS_JSON
+        from_secret: GOOGLE_CREDS_JSON
+      - key: PDF_FOLDER_ID
+        from_secret: PDF_FOLDER_ID
+    build_command: pip install -r requirements.txt
+    start_command: streamlit run main.py
+    disk:
+      size_gb: 1
