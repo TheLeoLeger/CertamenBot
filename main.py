@@ -55,8 +55,8 @@ st.title("Ask your Certamen Sourcebooks")
 
 # --- LOAD AND PROCESS PDF SOURCEBOOKS WITH OCR ---
 @st.cache_data
-def load_sourcebooks(service):
-    results = service.files().list(
+def load_sourcebooks(_service):
+    results = _service.files().list(
         q=f"'{PDF_FOLDER_ID}' in parents and mimeType='application/pdf'",
         pageSize=50,
         fields="files(id, name)"
@@ -69,7 +69,7 @@ def load_sourcebooks(service):
         pdf_id = file['id']
         pdf_name = file['name']
 
-        pdf_bytes = service.files().get_media(fileId=pdf_id).execute()
+        pdf_bytes = _service.files().get_media(fileId=pdf_id).execute()
         try:
             # Convert PDF pages to images
             images = convert_from_bytes(pdf_bytes)
