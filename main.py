@@ -1,275 +1,193 @@
 import os
-import json
-import tempfile
 import streamlit as st
-from io import BytesIO
-
-# Google API
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-
-# PDF & OCR
-import fitz  # PyMuPDF
-import pytesseract
-
-# LangChain and OpenAI
 from langchain.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
+from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.chains import RetrievalQA
 from langchain.chat_models import ChatOpenAI
+from langchain.schema import HumanMessage, AIMessage
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+import pytesseract
+import fitz  # PyMuPDF
+from io import BytesIO
 
+# ENV variables
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GOOGLE_CREDS_JSON = os.getenv("GOOGLE_CREDS_JSON")
+PDF_FOLDER_ID = os.getenv("PDF_FOLDER_ID")
 
-# === ENVIRONMENT VARIABLES / SECRETS ===
+# Streamlit page config
+st.set_page_config(page_title="AI PDF Chat", page_icon="📄", layout="wide")
 
-OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-GOOGLE_CREDENTIALS_JSON = st.secrets.get("GOOGLE_CREDENTIALS_JSON") or os.getenv("GOOGLE_CREDENTIALS_JSON")
-PDF_FOLDER_ID = st.secrets.get("PDF_FOLDER_ID") or os.getenv("PDF_FOLDER_ID")
+# Dark theme CSS
+st.markdown(
+    """
+    <style>
+        .css-1d391kg {background-color: #121212;}
+        .css-1v3fvcr, .stTextInput>div>input, .css-ffhzg2 {color: #eee;}
+        .stTextInput>div>input {background-color: #222;}
+        .css-10trblm {background-color: #121212;}
+        .css-ocqkz7 {background-color: #000;}
+        .streamlit-expanderHeader {color: #eee;}
+        .userMsg {background: #222; color: white; padding: 10px; border-radius: 8px; margin: 5px 0;}
+        .botMsg {background: #333; color: white; padding: 10px; border-radius: 8px; margin: 5px 0;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-
-# === GOOGLE DRIVE SERVICE SETUP ===
-
+# Google Drive API service
+@st.cache_resource(show_spinner=False)
 def get_drive_service():
-    if not GOOGLE_CREDENTIALS_JSON:
-        st.error("Google credentials not found!")
+    if not GOOGLE_CREDS_JSON:
         return None
-    creds_info = json.loads(GOOGLE_CREDENTIALS_JSON)
-    creds = service_account.Credentials.from_service_account_info(
-        creds_info, scopes=["https://www.googleapis.com/auth/drive.readonly"]
+    creds_dict = eval(GOOGLE_CREDS_JSON)
+    creds = Credentials.from_service_account_info(
+        creds_dict,
+        scopes=["https://www.googleapis.com/auth/drive.readonly"],
     )
-    service = build("drive", "v3", credentials=creds)
-    return service
+    return build("drive", "v3", credentials=creds)
 
 
-def list_pdfs_in_folder(service, folder_id):
-    """List PDF files in a Google Drive folder."""
-    results = []
-    page_token = None
-    query = f"'{folder_id}' in parents and mimeType='application/pdf' and trashed=false"
-    while True:
-        response = (
-            service.files()
-            .list(
-                q=query,
-                spaces='drive',
-                fields='nextPageToken, files(id, name)',
-                pageToken=page_token
-            )
-            .execute()
+@st.cache_data(show_spinner=False)
+def load_pdfs_from_drive(service):
+    if not service or not PDF_FOLDER_ID:
+        return []
+    results = (
+        service.files()
+        .list(
+            q=f"'{PDF_FOLDER_ID}' in parents and mimeType='application/pdf' and trashed = false",
+            fields="files(id, name)",
         )
-        files = response.get('files', [])
-        results.extend(files)
-        page_token = response.get('nextPageToken', None)
-        if page_token is None:
-            break
-    return results
-
-
-def download_file(service, file_id):
-    """Download file bytes from Google Drive."""
-    request = service.files().get_media(fileId=file_id)
-    from googleapiclient.http import MediaIoBaseDownload
-    fh = BytesIO()
-    downloader = MediaIoBaseDownload(fh, request)
-    done = False
-    while done is False:
-        status, done = downloader.next_chunk()
-    fh.seek(0)
-    return fh.read()
-
-
-# === PDF TEXT EXTRACTION WITH OCR FALLBACK ===
-
-def extract_text_from_pdf(file_path: str) -> str:
-    """
-    Extract text from a PDF file.
-    Try text extraction first; if empty, do OCR per page.
-    """
-    text = ""
-    try:
-        loader = PyPDFLoader(file_path)
-        pages = loader.load_and_split()
-        text = "\n".join([page.page_content for page in pages])
-    except Exception as e:
-        st.warning(f"Standard PDF extraction failed: {e}")
-
-    # If text empty or too short, fallback to OCR
-    if len(text.strip()) < 20:
-        st.info("Text extraction empty or too short. Running OCR fallback...")
+        .execute()
+    )
+    files = results.get("files", [])
+    docs = []
+    for f in files:
+        file_id = f["id"]
+        file_name = f["name"]
+        fh = BytesIO()
+        request = service.files().get_media(fileId=file_id)
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while done is False:
+            status, done = downloader.next_chunk()
+        fh.seek(0)
+        loader = PyPDFLoader(fh)
         try:
-            doc = fitz.open(file_path)
-            ocr_text = []
-            for page in doc:
-                pix = page.get_pixmap(dpi=300)
-                img_bytes = pix.tobytes(output="png")
-                text_img = pytesseract.image_to_string(BytesIO(img_bytes))
-                ocr_text.append(text_img)
-            text = "\n".join(ocr_text)
+            docs.extend(loader.load())
         except Exception as e:
-            st.error(f"OCR fallback failed: {e}")
-            text = ""
-
-    if len(text.strip()) == 0:
-        st.error("No text extracted from PDF even after OCR fallback.")
-    return text
+            st.warning(f"Failed to load {file_name}: {e}")
+    return docs
 
 
-# === DOCUMENT PROCESSING AND VECTOR STORE CREATION ===
+def extract_text_from_pdf(file) -> str:
+    try:
+        pdf = fitz.open(stream=file.read(), filetype="pdf")
+        text = ""
+        for page in pdf:
+            page_text = page.get_text()
+            if page_text.strip():
+                text += page_text + "\n"
+        if text.strip():
+            return text
+    except Exception:
+        file.seek(0)
 
-@st.cache_data(show_spinner=True)
-def process_and_create_vectorstore(pdf_bytes_list):
-    """
-    Receives list of tuples [(filename, bytes)], extracts text,
-    splits to chunks, creates FAISS vectorstore and returns it.
-    """
-    from langchain.schema import Document
+    try:
+        file.seek(0)
+        pdf = fitz.open(stream=file.read(), filetype="pdf")
+        ocr_text = ""
+        for page in pdf:
+            pix = page.get_pixmap(dpi=300)
+            img_bytes = pix.tobytes("png")
+            ocr_text += pytesseract.image_to_string(img_bytes) + "\n"
+        if ocr_text.strip():
+            return ocr_text
+    except Exception as e:
+        st.error(f"OCR failed: {e}")
+    return ""
 
-    documents = []
 
-    for filename, pdf_bytes in pdf_bytes_list:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            tmp_file.write(pdf_bytes)
-            tmp_file.flush()
-            text = extract_text_from_pdf(tmp_file.name)
-            if not text:
-                continue
-            # Create Document with metadata filename
-            documents.append(Document(page_content=text, metadata={"source": filename}))
-
-    if not documents:
-        st.error("No documents loaded to create vectorstore.")
-        return None
-
-    # Split long texts into chunks for embeddings
+@st.cache_data(show_spinner=False)
+def create_vectorstore(documents):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
     chunks = text_splitter.split_documents(documents)
-
-    # Create embeddings and vectorstore
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-    vectorstore = FAISS.from_documents(chunks, embeddings)
-
-    return vectorstore
+    return FAISS.from_documents(chunks, embeddings)
 
 
-# === SETUP RETRIEVAL-BASED QA CHAIN ===
+def load_pdfs_from_upload(uploaded_files):
+    documents = []
+    for uploaded_file in uploaded_files:
+        text = extract_text_from_pdf(uploaded_file)
+        if not text.strip():
+            st.warning(f"No text found in {uploaded_file.name}, skipping.")
+            continue
+        documents.append({"page_content": text, "metadata": {"source": uploaded_file.name}})
+    return documents
 
-def get_qa_chain(vectorstore):
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY),
-        retriever=vectorstore.as_retriever(),
-        return_source_documents=True,
-    )
-    return qa_chain
 
+st.title("📄 AI PDF Chat with OCR & Google Drive")
 
-# === STREAMLIT UI ===
+uploaded_files = st.file_uploader(
+    "Upload PDFs or use the Drive folder:",
+    type=["pdf"],
+    accept_multiple_files=True,
+)
 
-def main():
-    st.set_page_config(page_title="AI PDF Chat — OCR + LangChain", layout="wide", initial_sidebar_state="expanded")
+drive_service = get_drive_service()
+source_documents = []
 
-    # Dark theme styling
-    st.markdown(
-        """
-        <style>
-        body {
-            background-color: #121212;
-            color: #e0e0e0;
-        }
-        .stTextInput>div>div>input {
-            background-color: #1f1f1f !important;
-            color: #fff !important;
-        }
-        .stButton>button {
-            background-color: #333 !important;
-            color: #fff !important;
-        }
-        .stMarkdown, .css-10trblm, .css-1d391kg {
-            color: #e0e0e0 !important;
-        }
-        .chat-message {
-            padding: 10px;
-            margin-bottom: 8px;
-            border-radius: 8px;
-        }
-        .chat-user {
-            background-color: #005f73;
-            color: white;
-            text-align: right;
-        }
-        .chat-ai {
-            background-color: #0a9396;
-            color: white;
-            text-align: left;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.title("📚 AI PDF Chat with OCR & LangChain")
-
-    # Sidebar: Upload PDFs (multiple)
-    st.sidebar.header("Upload PDFs")
-    uploaded_files = st.sidebar.file_uploader(
-        "Upload one or more PDFs (supports scanned PDFs via OCR)", type=["pdf"], accept_multiple_files=True
-    )
-
-    # Load PDFs from Google Drive folder if PDF_FOLDER_ID is set
-    pdf_bytes_list = []
-    if PDF_FOLDER_ID:
-        st.sidebar.info(f"Loading PDFs from Google Drive folder ID: {PDF_FOLDER_ID}")
-        service = get_drive_service()
-        if service:
-            try:
-                pdf_files = list_pdfs_in_folder(service, PDF_FOLDER_ID)
-                for f in pdf_files:
-                    file_bytes = download_file(service, f['id'])
-                    pdf_bytes_list.append((f['name'], file_bytes))
-                st.sidebar.success(f"Loaded {len(pdf_files)} PDFs from Google Drive folder")
-            except Exception as e:
-                st.sidebar.error(f"Error loading PDFs from Google Drive: {e}")
+if PDF_FOLDER_ID and drive_service:
+    with st.spinner("Loading PDFs from Google Drive folder..."):
+        drive_docs = load_pdfs_from_drive(drive_service)
+        if drive_docs:
+            source_documents.extend(drive_docs)
         else:
-            st.sidebar.error("Google Drive service not available. Check your credentials.")
+            st.info("No PDFs found in the Drive folder.")
 
-    # Add uploaded PDFs to list
-    if uploaded_files:
-        for file in uploaded_files:
-            pdf_bytes_list.append((file.name, file.read()))
+if uploaded_files:
+    with st.spinner("Processing uploaded PDFs..."):
+        uploaded_docs = load_pdfs_from_upload(uploaded_files)
+        source_documents.extend(uploaded_docs)
 
-    if not pdf_bytes_list:
-        st.warning("Please upload PDFs or set a valid PDF_FOLDER_ID to load documents.")
-        return
+if not source_documents:
+    st.warning("Upload PDFs or set a valid Google Drive folder with PDFs.")
+    st.stop()
 
-    st.info(f"Processing {len(pdf_bytes_list)} PDF(s)... This can take some seconds.")
+with st.spinner("Creating vector store..."):
+    vectorstore = create_vectorstore(source_documents)
 
-    vectorstore = process_and_create_vectorstore(pdf_bytes_list)
-    if vectorstore:
-        st.session_state.vectorstore = vectorstore
-        st.success("Vectorstore created. You can now chat with your documents!")
+llm = ChatOpenAI(
+    temperature=0,
+    streaming=True,
+    openai_api_key=OPENAI_API_KEY,
+    model="gpt-4",
+)
+retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
+
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+def chat(user_input):
+    st.session_state.history.append(HumanMessage(content=user_input))
+    response = qa_chain.run(user_input)
+    st.session_state.history.append(AIMessage(content=response))
+
+st.sidebar.header("Chat History")
+for msg in st.session_state.history:
+    if isinstance(msg, HumanMessage):
+        st.sidebar.markdown(f"<div class='userMsg'>{msg.content}</div>", unsafe_allow_html=True)
     else:
-        return
+        st.sidebar.markdown(f"<div class='botMsg'>{msg.content}</div>", unsafe_allow_html=True)
 
-    qa = get_qa_chain(st.session_state.vectorstore)
+user_question = st.text_input("Ask a question about your PDFs:", key="input")
 
-    # Session state init for chat history
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-
-    # Chat input
-    query = st.text_input("Ask anything about your documents:", key="input")
-    if query:
-        with st.spinner("Thinking..."):
-            result = qa({"query": query})
-            answer = result["result"]
-            sources = result.get("source_documents", [])
-
-            st.session_state.chat_history.append({"question": query, "answer": answer, "sources": sources})
-
-    # Display chat history
-    for i, chat in enumerate(st.session_state.chat_history):
-        st.markdown(
-            f'<div class="chat-message chat-user">**You:** {chat["question"]}</div>', unsafe_allow_html=True
-        )
-        st.markdown(
-            f'<div class="chat-message chat-ai">**AI:** {chat["answer"]}</
+if user_question:
+    chat(user_question)
+    st.experimental_rerun()
