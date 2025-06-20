@@ -7,3 +7,4 @@ google-auth-oauthlib
 openai
 langchain
 faiss-cpu
+langchain-community
