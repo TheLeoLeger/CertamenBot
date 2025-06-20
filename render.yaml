@@ -1,14 +1,15 @@
 services:
   - type: web
-    name: pdf-chat-ui
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run main.py --server.port $PORT
+    name: pdf-chat-ai
+    env: docker
+    region: oregon
+    plan: free
+    buildCommand: ""
+    startCommand: ""
     envVars:
       - key: OPENAI_API_KEY
-        sync: false
+        sync: true
       - key: GOOGLE_CREDS_JSON
-        sync: false
+        sync: true
       - key: PDF_FOLDER_ID
-        sync: false
-    plan: free
+        sync: true
