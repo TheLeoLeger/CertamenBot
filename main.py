@@ -15,22 +15,7 @@ from langchain.chat_models import ChatOpenAI
 from langchain.docstore.document import Document
 import json
 
-import os
-import streamlit as st
-import service_account
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-from io import BytesIO
-import base64
-from PyPDF2 import PdfReader
-from langchain_community.vectorstores import FAISS
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.text_splitter import CharacterTextSplitter
-from langchain.chains.question_answering import load_qa_chain
-from langchain.chat_models import ChatOpenAI
-from langchain.docstore.document import Document
-import json
+
 def authenticate_drive():
     credentials_json = os.getenv("GOOGLE_CREDENTIALS")
     credentials_dict = json.loads(credentials_json)
