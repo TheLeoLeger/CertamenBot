@@ -47,7 +47,7 @@ st.title("📚 AI Chat from Your PDFs (OCR‑enabled)")
 # --- GOOGLE DRIVE FUNCTIONS ---
 @st.cache_resource(show_spinner=False)
 def get_drive_service():
-    creds_info = json.loads(GOOGLE_CREDS_JSON)
+    creds_info = json.loads(GOOGLE_CREDS)
     creds = Credentials.from_service_account_info(
         creds_info,
         scopes=["https://www.googleapis.com/auth/drive.readonly"]
