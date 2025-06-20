@@ -64,3 +64,97 @@ def fetch_pdfs_from_drive(service, folder_id):
     docs = []
     downloader = MediaIoBaseDownload
     for f in files:
+        fh = BytesIO()
+        req = service.files().get_media(fileId=f["id"])
+        dl = downloader(fh, req)
+        done = False
+        while not done:
+            _, done = dl.next_chunk()
+        fh.seek(0)
+        docs.append((f["name"], fh.read()))
+    return docs
+
+# --- TEXT EXTRACTION WITH OCR FALLBACK ---
+def extract_text(pdf_bytes: bytes) -> str:
+    text = ""
+    try:
+        pdf = fitz.open(stream=pdf_bytes, filetype="pdf")
+        for page in pdf:
+            txt = page.get_text()
+            if txt and txt.strip():
+                text += txt + "\n"
+        if text.strip():
+            return text
+    except Exception:
+        pass
+
+    # OCR fallback
+    try:
+        pdf = fitz.open(stream=pdf_bytes, filetype="pdf")
+        for page in pdf:
+            pix = page.get_pixmap(dpi=300)
+            txt = pytesseract.image_to_string(pix.tobytes("png"))
+            text += txt + "\n"
+        return text
+    except Exception:
+        return text
+
+# --- BUILD VECTORSTORE ---
+@st.cache_resource(show_spinner=True)
+def build_vectorstore(pdf_list):
+    docs = []
+    for name, pdf in pdf_list:
+        txt = extract_text(pdf)
+        if not txt.strip():
+            st.warning(f"⚠️ No text extracted from {name}.")
+            continue
+        docs.append(Document(page_content=txt, metadata={"source": name}))
+    if not docs:
+        st.error("No valid documents to process.")
+        return None
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    chunks = splitter.split_documents(docs)
+    emb = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    return FAISS.from_documents(chunks, emb)
+
+# --- INITIALIZE ---
+service = get_drive_service()
+pdf_files = fetch_pdfs_from_drive(service, PDF_FOLDER_ID)
+if not pdf_files:
+    st.error("No PDFs found in your Drive folder.")
+    st.stop()
+
+vectorstore = build_vectorstore(pdf_files)
+if not vectorstore:
+    st.stop()
+
+qa = RetrievalQA.from_chain_type(
+    llm=ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY),
+    retriever=vectorstore.as_retriever(),
+    return_source_documents=True,
+)
+
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+# --- USER QUERY ---
+query = st.text_input("Ask something about your sourcebooks:", key="user_input")
+if query:
+    with st.spinner("Thinking..."):
+        res = qa({"query": query})
+        ans = res["result"]
+        srcs = res.get("source_documents", [])
+        st.session_state.history.append((query, ans, srcs))
+
+# --- SHOW CHAT ---
+for q, ans, sources in st.session_state.history:
+    st.markdown(f"<div class='chat-user'><b>You:</b> {q}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='chat-ai'><b>AI:</b> {ans}</div>", unsafe_allow_html=True)
+    if sources:
+        bullets = "\n".join(f"- {doc.metadata.get('source')}" for doc in sources)
+        st.markdown(f"**Sources:**\n{bullets}")
+
+if st.button("Clear Chat"):
+    st.session_state.history = []
+    st.experimental_rerun()
