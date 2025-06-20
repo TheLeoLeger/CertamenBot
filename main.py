@@ -1,12 +1,8 @@
 import os
 import json
 from io import BytesIO
-from PIL import Image
-import pytesseract
-from pdf2image import convert_from_bytes
 
 import streamlit as st
-from PyPDF2 import PdfReader
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
@@ -16,6 +12,9 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain.chains.question_answering import load_qa_chain
 from langchain.chat_models import ChatOpenAI
 from langchain.docstore.document import Document
+
+from pdf2image import convert_from_bytes
+import pytesseract
 
 # --- ENV VARIABLES ---
 CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS")
@@ -34,30 +33,30 @@ st.set_page_config(page_title="Certamen Sourcebook AI", layout="centered")
 st.markdown("""
     <style>
     .user-bubble {
-        background-color: #f0f0f0;
+        background-color: #dcf8c6;
         padding: 12px;
         border-radius: 20px;
         margin: 10px 0;
-        color: #111;
         width: fit-content;
+        color: black;
     }
     .ai-bubble {
-        background-color: #dbeafe;
+        background-color: #ececec;
         padding: 12px;
         border-radius: 20px;
         margin: 10px 0;
-        color: #111;
         width: fit-content;
+        color: black;
     }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("Ask your Certamen Sourcebooks")
 
-# --- LOAD AND PROCESS PDF SOURCEBOOKS ---
+# --- LOAD AND PROCESS PDF SOURCEBOOKS WITH OCR ---
 @st.cache_data
-def load_sourcebooks(_service):
-    results = _service.files().list(
+def load_sourcebooks(service):
+    results = service.files().list(
         q=f"'{PDF_FOLDER_ID}' in parents and mimeType='application/pdf'",
         pageSize=50,
         fields="files(id, name)"
@@ -69,26 +68,25 @@ def load_sourcebooks(_service):
     for file in files:
         pdf_id = file['id']
         pdf_name = file['name']
-        request = _service.files().get_media(fileId=pdf_id)
-        pdf_bytes = request.execute()
-        fh = BytesIO(pdf_bytes)
-        pdf_reader = PdfReader(fh)
 
-        for i, page in enumerate(pdf_reader.pages):
-            text = page.extract_text()
-            if text and text.strip():
-                doc = Document(page_content=text, metadata={"source": pdf_name, "page": i + 1})
-                texts.append(doc)
-            else:
-                try:
-                    images = convert_from_bytes(pdf_bytes, first_page=i + 1, last_page=i + 1)
-                    for img in images:
-                        ocr_text = pytesseract.image_to_string(img)
-                        if ocr_text.strip():
-                            doc = Document(page_content=ocr_text, metadata={"source": pdf_name, "page": i + 1})
-                            texts.append(doc)
-                except Exception as e:
-                    st.warning(f"OCR failed for page {i+1} of {pdf_name}: {e}")
+        pdf_bytes = service.files().get_media(fileId=pdf_id).execute()
+        try:
+            # Convert PDF pages to images
+            images = convert_from_bytes(pdf_bytes)
+
+            for i, image in enumerate(images):
+                # OCR each page image to text
+                text = pytesseract.image_to_string(image)
+
+                if text.strip():
+                    texts.append(Document(page_content=text, metadata={"source": pdf_name, "page": i + 1}))
+        except Exception as e:
+            st.error(f"Error processing {pdf_name}: {e}")
+
+    if not texts:
+        st.error("⚠️ No text extracted from PDFs. They may be corrupted or unreadable.")
+    else:
+        st.success(f"✅ Extracted text from {len(texts)} pages across {len(files)} PDFs.")
 
     return texts
 
@@ -107,12 +105,13 @@ def create_vectorstore(documents):
 # --- QUESTION ANSWERING LOGIC ---
 def ask_question(vectorstore, query):
     llm = ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY, model_name="gpt-4")
-    chain = load_qa_chain(llm, chain_type="refine")
+    chain = load_qa_chain(llm, chain_type="refine")  # or "map_reduce" for broader answers
     docs = vectorstore.similarity_search(query, k=5)
     answer = chain.run(input_documents=docs, question=query)
 
+    # Format citations from metadata
     sources = "\n\n".join([
-        f"📄 **{doc.metadata.get('source', 'Unknown Source')} – Page {doc.metadata.get('page', '?')}**\n{doc.page_content[:300].strip()}..."
+        f"📄 **{doc.metadata.get('source', 'Unknown Source')} (Page {doc.metadata.get('page', '?')})**\n{doc.page_content[:300].strip()}..."
         for doc in docs
     ])
 
@@ -123,14 +122,15 @@ if 'vectorstore' not in st.session_state:
     with st.spinner("🔐 Authenticating with Google Drive..."):
         drive_service = authenticate_drive()
 
-    with st.spinner("📚 Loading sourcebooks from Drive..."):
+    with st.spinner("📚 Loading sourcebooks from Drive (OCR in progress)..."):
         source_documents = load_sourcebooks(drive_service)
-        if not source_documents:
-            st.warning("⚠️ No text extracted from PDFs. Check if they are scanned images or corrupted.")
 
-    with st.spinner("🧠 Building vector database..."):
-        vs = create_vectorstore(source_documents)
-        st.session_state.vectorstore = vs
+    if source_documents:
+        with st.spinner("🧠 Building vector database..."):
+            vs = create_vectorstore(source_documents)
+            st.session_state.vectorstore = vs
+    else:
+        st.stop()  # Stop if no documents loaded
 
 prompt = st.chat_input("Ask me something about your sourcebooks!")
 
@@ -138,20 +138,20 @@ if prompt:
     with st.chat_message("user"):
         st.markdown(f"<div class='user-bubble'>{prompt}</div>", unsafe_allow_html=True)
 
-    with st.spinner("🧠 Thinking..."):
-        if "vectorstore" in st.session_state:
+    if 'vectorstore' not in st.session_state:
+        st.error("Vectorstore not initialized. Please reload after sourcebooks are loaded.")
+    else:
+        with st.spinner("🧠 Thinking..."):
             answer, sources = ask_question(st.session_state.vectorstore, prompt)
-        else:
-            answer, sources = "⚠️ Vector database not initialized.", ""
 
-    with st.chat_message("assistant"):
-        st.markdown("""
-            <div class='ai-bubble'>
-            <strong>📘 Answer:</strong><br>
-        """, unsafe_allow_html=True)
-        st.markdown(answer, unsafe_allow_html=True)
+        with st.chat_message("assistant"):
+            st.markdown("""
+                <div class='ai-bubble'>
+                <strong>📘 Answer:</strong><br>
+            """, unsafe_allow_html=True)
+            st.markdown(answer, unsafe_allow_html=True)
 
-        st.markdown("""
-            <br><strong>📎 Sources I used:</strong><br>
-        """, unsafe_allow_html=True)
-        st.markdown(sources, unsafe_allow_html=True)
+            st.markdown("""
+                <br><strong>📎 Sources I used:</strong><br>
+            """, unsafe_allow_html=True)
+            st.markdown(sources, unsafe_allow_html=True)
