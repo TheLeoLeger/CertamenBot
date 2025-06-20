@@ -1,8 +1,9 @@
 streamlit
-langchain
-langchain-community
-faiss-cpu
+google-api-python-client
+google-auth
+google-auth-oauthlib
 pytesseract
-pdf2image
-Pillow
-tqdm
+PyMuPDF
+langchain
+openai
+faiss-cpu
