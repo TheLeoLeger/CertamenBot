@@ -8,3 +8,4 @@ PyMuPDF
 openai
 langchain
 faiss-cpu
+tesseract-ocr
