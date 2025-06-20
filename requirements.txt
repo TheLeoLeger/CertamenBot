@@ -1,11 +1,9 @@
 streamlit
+pytesseract
+PyMuPDF
 google-api-python-client
 google-auth
 google-auth-oauthlib
-google-auth-httplib2
-pytesseract
-PyMuPDF
 openai
 langchain
 faiss-cpu
-tesseract-ocr
