@@ -1,14 +1,6 @@
 services:
   - type: web
-    name: certamen-sourcebook-ai
+    name: pdf-ai-reader
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run main.py --server.port $PORT
-    envVars:
-      - key: GOOGLE_CREDENTIALS
-        value: YOUR_GOOGLE_SERVICE_ACCOUNT_JSON_STRING
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: PDF_FOLDER_ID
-        value: YOUR_GOOGLE_DRIVE_FOLDER_ID
-    autoDeploy: true
+    buildCommand: apt-get update && apt-get install -y poppler-utils tesseract-ocr && pip install -r requirements.txt
+    startCommand: streamlit run main.py
