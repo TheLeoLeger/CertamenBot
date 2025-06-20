@@ -59,9 +59,6 @@ def load_sourcebooks(_service):
     ).execute()
 
     files = results.get('files', [])
-    st.write(f"Found {len(files)} PDF files in folder")
-if not files:
-    st.warning("No PDF files found in the Google Drive folder.")
     texts = []
 
     for file in files:
@@ -70,8 +67,6 @@ if not files:
         request = _service.files().get_media(fileId=pdf_id)
         pdf_bytes = request.execute()
         fh = BytesIO(pdf_bytes)
-
-
         pdf_reader = PdfReader(fh)
         for page in pdf_reader.pages:
             text = page.extract_text()
