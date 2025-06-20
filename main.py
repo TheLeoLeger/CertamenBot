@@ -51,8 +51,9 @@ st.title("Ask your Certamen Sourcebooks")
 
 # --- LOAD AND PROCESS PDF SOURCEBOOKS ---
 @st.cache_data
-def load_sourcebooks(service):
-    results = service.files().list(
+@st.cache_data
+def load_sourcebooks(_service):
+    results = _service.files().list(
         q=f"'{PDF_FOLDER_ID}' in parents and mimeType='application/pdf'",
         pageSize=50,
         fields="files(id, name)"
@@ -60,6 +61,25 @@ def load_sourcebooks(service):
 
     files = results.get('files', [])
     texts = []
+
+    for file in files:
+        pdf_id = file['id']
+        pdf_name = file['name']
+        request = _service.files().get_media(fileId=pdf_id)
+        fh = BytesIO()
+        downloader = request.execute()
+        fh.write(downloader)
+        fh.seek(0)
+
+        pdf_reader = PdfReader(fh)
+        for page in pdf_reader.pages:
+            text = page.extract_text()
+            if text:
+                doc = Document(page_content=text, metadata={"source": pdf_name})
+                texts.append(doc)
+
+    return texts
+
 
     for file in files:
         pdf_id = file['id']
