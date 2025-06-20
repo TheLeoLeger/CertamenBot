@@ -18,3 +18,7 @@ langchain
 faiss-cpu
 langchain-community
 tiktoken
+pytesseract
+pdf2image
+Pillow
+poppler-utils
