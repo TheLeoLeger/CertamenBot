@@ -8,6 +8,7 @@ import tempfile
 import os
 import numpy as np
 import cv2
+import fitz
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
