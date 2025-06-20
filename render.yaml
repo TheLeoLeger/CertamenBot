@@ -1,16 +1,14 @@
 services:
   - type: web
-    name: ai-pdf-chat
+    name: pdf-chat-ui
     env: python
-    plan: starter
-    env_vars:
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run main.py --server.port $PORT
+    envVars:
       - key: OPENAI_API_KEY
-        from_secret: OPENAI_API_KEY
+        sync: false
       - key: GOOGLE_CREDS_JSON
-        from_secret: GOOGLE_CREDS_JSON
+        sync: false
       - key: PDF_FOLDER_ID
-        from_secret: PDF_FOLDER_ID
-    build_command: pip install -r requirements.txt
-    start_command: streamlit run main.py
-    disk:
-      size_gb: 1
+        sync: false
+    plan: free
