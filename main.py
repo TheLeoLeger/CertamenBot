@@ -1,6 +1,9 @@
 import os
 import json
 from io import BytesIO
+from PIL import Image
+import pytesseract
+from pdf2image import convert_from_bytes
 
 import streamlit as st
 from PyPDF2 import PdfReader
@@ -31,19 +34,19 @@ st.set_page_config(page_title="Certamen Sourcebook AI", layout="centered")
 st.markdown("""
     <style>
     .user-bubble {
-        background-color: #dcf8c6;
-        color: #111;
+        background-color: #f0f0f0;
         padding: 12px;
         border-radius: 20px;
         margin: 10px 0;
+        color: #111;
         width: fit-content;
     }
     .ai-bubble {
-        background-color: #ececec;
-        color: #111;
+        background-color: #dbeafe;
         padding: 12px;
         border-radius: 20px;
         margin: 10px 0;
+        color: #111;
         width: fit-content;
     }
     </style>
@@ -70,11 +73,22 @@ def load_sourcebooks(_service):
         pdf_bytes = request.execute()
         fh = BytesIO(pdf_bytes)
         pdf_reader = PdfReader(fh)
+
         for i, page in enumerate(pdf_reader.pages):
             text = page.extract_text()
-            if text:
+            if text and text.strip():
                 doc = Document(page_content=text, metadata={"source": pdf_name, "page": i + 1})
                 texts.append(doc)
+            else:
+                try:
+                    images = convert_from_bytes(pdf_bytes, first_page=i + 1, last_page=i + 1)
+                    for img in images:
+                        ocr_text = pytesseract.image_to_string(img)
+                        if ocr_text.strip():
+                            doc = Document(page_content=ocr_text, metadata={"source": pdf_name, "page": i + 1})
+                            texts.append(doc)
+                except Exception as e:
+                    st.warning(f"OCR failed for page {i+1} of {pdf_name}: {e}")
 
     return texts
 
@@ -98,53 +112,46 @@ def ask_question(vectorstore, query):
     answer = chain.run(input_documents=docs, question=query)
 
     sources = "\n\n".join([
-        f"📄 **{doc.metadata.get('source', 'Unknown')}**, page {doc.metadata.get('page', '?')}\n{doc.page_content[:300].strip()}..."
+        f"📄 **{doc.metadata.get('source', 'Unknown Source')} – Page {doc.metadata.get('page', '?')}**\n{doc.page_content[:300].strip()}..."
         for doc in docs
     ])
 
     return answer, sources
 
 # --- MAIN APP LOGIC ---
-# Ensure session state key always exists
 if 'vectorstore' not in st.session_state:
-    st.session_state.vectorstore = None
-
-if st.session_state.vectorstore is None:
     with st.spinner("🔐 Authenticating with Google Drive..."):
         drive_service = authenticate_drive()
 
     with st.spinner("📚 Loading sourcebooks from Drive..."):
         source_documents = load_sourcebooks(drive_service)
+        if not source_documents:
+            st.warning("⚠️ No text extracted from PDFs. Check if they are scanned images or corrupted.")
 
-    if not source_documents:
-        st.warning("⚠️ No text extracted from PDFs. Check that your PDFs are not scanned images.")
-    else:
-        st.success(f"✅ Loaded {len(source_documents)} documents")
+    with st.spinner("🧠 Building vector database..."):
+        vs = create_vectorstore(source_documents)
+        st.session_state.vectorstore = vs
 
-        with st.spinner("🧠 Building vector database..."):
-            st.session_state.vectorstore = create_vectorstore(source_documents)
-
-# --- CHAT INPUT ---
 prompt = st.chat_input("Ask me something about your sourcebooks!")
 
 if prompt:
     with st.chat_message("user"):
         st.markdown(f"<div class='user-bubble'>{prompt}</div>", unsafe_allow_html=True)
 
-    if st.session_state.vectorstore is not None:
-        with st.spinner("🧠 Thinking..."):
+    with st.spinner("🧠 Thinking..."):
+        if "vectorstore" in st.session_state:
             answer, sources = ask_question(st.session_state.vectorstore, prompt)
+        else:
+            answer, sources = "⚠️ Vector database not initialized.", ""
 
-        with st.chat_message("assistant"):
-            st.markdown("""
-                <div class='ai-bubble'>
-                <strong>📘 Answer:</strong><br>
-            """, unsafe_allow_html=True)
-            st.markdown(answer, unsafe_allow_html=True)
+    with st.chat_message("assistant"):
+        st.markdown("""
+            <div class='ai-bubble'>
+            <strong>📘 Answer:</strong><br>
+        """, unsafe_allow_html=True)
+        st.markdown(answer, unsafe_allow_html=True)
 
-            st.markdown("""
-                <br><strong>📎 Sources I used:</strong><br>
-            """, unsafe_allow_html=True)
-            st.markdown(sources, unsafe_allow_html=True)
-    else:
-        st.error("❌ Vectorstore is not initialized. Please reload the app.")
+        st.markdown("""
+            <br><strong>📎 Sources I used:</strong><br>
+        """, unsafe_allow_html=True)
+        st.markdown(sources, unsafe_allow_html=True)
