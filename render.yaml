@@ -15,5 +15,5 @@ services:
 
 build:
   packages:
-    - poppler-utils
-    - tesseract-ocr
+    - poppler-utils     # for pdf2image
+    - tesseract-ocr     # for pytesseract OCR
