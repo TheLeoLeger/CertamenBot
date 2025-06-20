@@ -51,7 +51,6 @@ st.title("Ask your Certamen Sourcebooks")
 
 # --- LOAD AND PROCESS PDF SOURCEBOOKS ---
 @st.cache_data
-@st.cache_data
 def load_sourcebooks(_service):
     results = _service.files().list(
         q=f"'{PDF_FOLDER_ID}' in parents and mimeType='application/pdf'",
@@ -60,16 +59,18 @@ def load_sourcebooks(_service):
     ).execute()
 
     files = results.get('files', [])
+    st.write(f"Found {len(files)} PDF files in folder")
+if not files:
+    st.warning("No PDF files found in the Google Drive folder.")
     texts = []
 
     for file in files:
         pdf_id = file['id']
         pdf_name = file['name']
         request = _service.files().get_media(fileId=pdf_id)
-        fh = BytesIO()
-        downloader = request.execute()
-        fh.write(downloader)
-        fh.seek(0)
+        pdf_bytes = request.execute()
+        fh = BytesIO(pdf_bytes)
+
 
         pdf_reader = PdfReader(fh)
         for page in pdf_reader.pages:
@@ -79,26 +80,9 @@ def load_sourcebooks(_service):
                 texts.append(doc)
 
     return texts
-
-
-    for file in files:
-        pdf_id = file['id']
-        pdf_name = file['name']
-        request = service.files().get_media(fileId=pdf_id)
-        fh = BytesIO()
-        downloader = request.execute()
-        fh.write(downloader)
-        fh.seek(0)
-
-        pdf_reader = PdfReader(fh)
-        for page in pdf_reader.pages:
-            text = page.extract_text()
-            if text:
-                doc = Document(page_content=text, metadata={"source": pdf_name})
-                texts.append(doc)
-
-    return texts
-
+    st.write(f"Loaded {len(texts)} documents")
+if not texts:
+    st.warning("No text extracted from PDFs")
 # --- VECTORSTORE CREATION ---
 @st.cache_resource
 def create_vectorstore(documents):
