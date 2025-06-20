@@ -75,9 +75,7 @@ def load_sourcebooks(_service):
                 texts.append(doc)
 
     return texts
-    st.write(f"Loaded {len(texts)} documents")
-if not texts:
-    st.warning("No text extracted from PDFs")
+
 # --- VECTORSTORE CREATION ---
 @st.cache_resource
 def create_vectorstore(documents):
@@ -93,7 +91,7 @@ def create_vectorstore(documents):
 # --- QUESTION ANSWERING LOGIC ---
 def ask_question(vectorstore, query):
     llm = ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY, model_name="gpt-4")
-    chain = load_qa_chain(llm, chain_type="refine")  # or "map_reduce" for broader answers
+    chain = load_qa_chain(llm, chain_type="refine")
     docs = vectorstore.similarity_search(query, k=5)
     answer = chain.run(input_documents=docs, question=query)
 
@@ -113,9 +111,14 @@ if 'vectorstore' not in st.session_state:
     with st.spinner("📚 Loading sourcebooks from Drive..."):
         source_documents = load_sourcebooks(drive_service)
 
-    with st.spinner("🧠 Building vector database..."):
-        vs = create_vectorstore(source_documents)
-        st.session_state.vectorstore = vs
+    if not source_documents:
+        st.warning("⚠️ No text extracted from PDFs")
+    else:
+        st.success(f"✅ Loaded {len(source_documents)} documents")
+
+        with st.spinner("🧠 Building vector database..."):
+            vs = create_vectorstore(source_documents)
+            st.session_state.vectorstore = vs
 
 prompt = st.chat_input("Ask me something about your sourcebooks!")
 
