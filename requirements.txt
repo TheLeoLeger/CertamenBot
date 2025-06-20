@@ -1,10 +1,12 @@
-streamlit
-PyPDF2
-pdf2image
+streamlit==1.35.0
+openai
+PyMuPDF==1.23.9
 pytesseract
+pdf2image
 google-api-python-client
 google-auth
+google-auth-oauthlib
 langchain
-openai
 faiss-cpu
-langchain-community
+python-dotenv
+Pillow
