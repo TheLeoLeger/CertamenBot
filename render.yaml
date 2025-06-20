@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: certamen-sourcebook-ai
+    env: python
+    buildCommand: |
+      apt-get update && \
+      apt-get install -y poppler-utils && \
+      pip install --upgrade pip && \
+      pip install -r requirements.txt
+    startCommand: streamlit run main.py --server.port 10000 --server.address 0.0.0.0
+    envVars:
+      - key: GOOGLE_CREDENTIALS
+        sync: false  # You will manually add this secret in the Render dashboard
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PDF_FOLDER_ID
+        sync: false
