@@ -1,19 +1,14 @@
 services:
   - type: web
-    name: certamen-ai
-    runtime: python
-    plan: free
+    name: certamen-sourcebook-ai
+    env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run main.py
+    startCommand: streamlit run main.py --server.port $PORT
     envVars:
       - key: GOOGLE_CREDENTIALS
-        sync: true
+        value: YOUR_GOOGLE_SERVICE_ACCOUNT_JSON_STRING
       - key: OPENAI_API_KEY
-        sync: true
+        sync: false
       - key: PDF_FOLDER_ID
-        sync: true
-
-build:
-  packages:
-    - poppler-utils     # for pdf2image
-    - tesseract-ocr     # for pytesseract OCR
+        value: YOUR_GOOGLE_DRIVE_FOLDER_ID
+    autoDeploy: true
