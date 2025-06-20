@@ -32,6 +32,7 @@ st.markdown("""
     <style>
     .user-bubble {
         background-color: #dcf8c6;
+        color: #111;
         padding: 12px;
         border-radius: 20px;
         margin: 10px 0;
@@ -39,6 +40,7 @@ st.markdown("""
     }
     .ai-bubble {
         background-color: #ececec;
+        color: #111;
         padding: 12px;
         border-radius: 20px;
         margin: 10px 0;
@@ -68,10 +70,10 @@ def load_sourcebooks(_service):
         pdf_bytes = request.execute()
         fh = BytesIO(pdf_bytes)
         pdf_reader = PdfReader(fh)
-        for page in pdf_reader.pages:
+        for i, page in enumerate(pdf_reader.pages):
             text = page.extract_text()
             if text:
-                doc = Document(page_content=text, metadata={"source": pdf_name})
+                doc = Document(page_content=text, metadata={"source": pdf_name, "page": i + 1})
                 texts.append(doc)
 
     return texts
@@ -95,16 +97,19 @@ def ask_question(vectorstore, query):
     docs = vectorstore.similarity_search(query, k=5)
     answer = chain.run(input_documents=docs, question=query)
 
-    # Format citations from metadata
     sources = "\n\n".join([
-        f"📄 **{doc.metadata.get('source', 'Unknown Source')}**\n{doc.page_content[:300].strip()}..."
+        f"📄 **{doc.metadata.get('source', 'Unknown')}**, page {doc.metadata.get('page', '?')}\n{doc.page_content[:300].strip()}..."
         for doc in docs
     ])
 
     return answer, sources
 
 # --- MAIN APP LOGIC ---
+# Ensure session state key always exists
 if 'vectorstore' not in st.session_state:
+    st.session_state.vectorstore = None
+
+if st.session_state.vectorstore is None:
     with st.spinner("🔐 Authenticating with Google Drive..."):
         drive_service = authenticate_drive()
 
@@ -112,31 +117,34 @@ if 'vectorstore' not in st.session_state:
         source_documents = load_sourcebooks(drive_service)
 
     if not source_documents:
-        st.warning("⚠️ No text extracted from PDFs")
+        st.warning("⚠️ No text extracted from PDFs. Check that your PDFs are not scanned images.")
     else:
         st.success(f"✅ Loaded {len(source_documents)} documents")
 
         with st.spinner("🧠 Building vector database..."):
-            vs = create_vectorstore(source_documents)
-            st.session_state.vectorstore = vs
+            st.session_state.vectorstore = create_vectorstore(source_documents)
 
+# --- CHAT INPUT ---
 prompt = st.chat_input("Ask me something about your sourcebooks!")
 
 if prompt:
     with st.chat_message("user"):
         st.markdown(f"<div class='user-bubble'>{prompt}</div>", unsafe_allow_html=True)
 
-    with st.spinner("🧠 Thinking..."):
-        answer, sources = ask_question(st.session_state.vectorstore, prompt)
+    if st.session_state.vectorstore is not None:
+        with st.spinner("🧠 Thinking..."):
+            answer, sources = ask_question(st.session_state.vectorstore, prompt)
 
-    with st.chat_message("assistant"):
-        st.markdown("""
-            <div class='ai-bubble'>
-            <strong>📘 Answer:</strong><br>
-        """, unsafe_allow_html=True)
-        st.markdown(answer, unsafe_allow_html=True)
+        with st.chat_message("assistant"):
+            st.markdown("""
+                <div class='ai-bubble'>
+                <strong>📘 Answer:</strong><br>
+            """, unsafe_allow_html=True)
+            st.markdown(answer, unsafe_allow_html=True)
 
-        st.markdown("""
-            <br><strong>📎 Sources I used:</strong><br>
-        """, unsafe_allow_html=True)
-        st.markdown(sources, unsafe_allow_html=True)
+            st.markdown("""
+                <br><strong>📎 Sources I used:</strong><br>
+            """, unsafe_allow_html=True)
+            st.markdown(sources, unsafe_allow_html=True)
+    else:
+        st.error("❌ Vectorstore is not initialized. Please reload the app.")
