@@ -1,11 +1,10 @@
 streamlit
-langchain
-langchain-community
-openai
 google-api-python-client
 google-auth
-google-auth-httplib2
 google-auth-oauthlib
+google-auth-httplib2
 pytesseract
-PyMuPDF==1.21.1
+PyMuPDF
+openai
+langchain
 faiss-cpu
