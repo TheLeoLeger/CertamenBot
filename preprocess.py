@@ -11,7 +11,7 @@ from googleapiclient.http import MediaIoBaseDownload
 
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import FAISS
 
 # --- ENVIRONMENT VARIABLES ---
