@@ -30,12 +30,19 @@ st.title("📚 AI Chat from Your PDFs (OCR‑enabled)")
 # --- LOAD VECTORSTORE ---
 @st.cache_resource(show_spinner=True)
 def load_vectorstore(path):
+    import os
+    if not os.path.exists(path):
+        st.error(f"Vectorstore path not found: {path}")
+        return None
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-    return FAISS.load_local(path, embeddings)
+    try:
+        return FAISS.load_local(path, embeddings)
+    except Exception as e:
+        st.error(f"Error loading vectorstore: {e}")
+        return None
 
 vectorstore = load_vectorstore(VECTORSTORE_PATH)
 if not vectorstore:
-    st.error("Failed to load vectorstore.")
     st.stop()
 
 # --- INIT QA CHAIN ---
@@ -68,4 +75,3 @@ for q, ans, sources in st.session_state.history:
 if st.button("Clear Chat"):
     st.session_state.history = []
     st.experimental_rerun()
-
