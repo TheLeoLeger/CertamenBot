@@ -17,11 +17,10 @@ from langchain.vectorstores import FAISS
 # --- ENVIRONMENT VARIABLES ---
 GOOGLE_CREDS = os.getenv("GOOGLE_CREDS")
 PDF_FOLDER_ID = os.getenv("PDF_FOLDER_ID")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 VECTORSTORE_SAVE_PATH = os.getenv("VECTORSTORE_PATH", "faiss_index")  # default save folder
 
-if not GOOGLE_CREDS or not PDF_FOLDER_ID or not OPENAI_API_KEY:
-    raise ValueError("Please set GOOGLE_CREDS, PDF_FOLDER_ID, and OPENAI_API_KEY environment variables.")
+if not GOOGLE_CREDS or not PDF_FOLDER_ID:
+    raise ValueError("Please set GOOGLE_CREDS and PDF_FOLDER_ID environment variables.")
 
 # --- SETUP GOOGLE DRIVE SERVICE ---
 def get_drive_service():
