@@ -110,7 +110,7 @@ def main():
     chunks = splitter.split_documents(documents)
 
     print("Creating embeddings...")
-    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
     print("Building FAISS vectorstore...")
     vectorstore = FAISS.from_documents(chunks, embeddings)
