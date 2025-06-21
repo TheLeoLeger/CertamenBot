@@ -1,8 +1,6 @@
 import os
 import streamlit as st
-import pickle
 
-# LangChain
 from langchain.chains import RetrievalQA
 from langchain.chat_models import ChatOpenAI
 from langchain.vectorstores import FAISS
@@ -10,15 +8,12 @@ from langchain.embeddings.openai import OpenAIEmbeddings
 
 # --- ENVIRONMENT VARIABLES ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GOOGLE_CREDS = os.getenv("GOOGLE_CREDS")  # Kept for compatibility
-PDF_FOLDER_ID = os.getenv("PDF_FOLDER_ID")  # Kept for compatibility
+VECTORSTORE_PATH = os.getenv("VECTORSTORE_PATH")  # path to saved FAISS index folder
 
 if not OPENAI_API_KEY:
     st.error("❌ OPENAI_API_KEY is not set.")
-if not GOOGLE_CREDS:
-    st.warning("⚠️ GOOGLE_CREDS is not used in this version but still required.")
-if not PDF_FOLDER_ID:
-    st.warning("⚠️ PDF_FOLDER_ID is not used in this version but still required.")
+if not VECTORSTORE_PATH:
+    st.error("❌ VECTORSTORE_PATH is not set.")
 
 # --- PAGE CONFIG & STYLING ---
 st.set_page_config(page_title="📚 PDF AI Chat", layout="wide")
@@ -30,19 +25,20 @@ st.markdown("""
     input, button { background: #222; color: white !important; }
     </style>
 """, unsafe_allow_html=True)
-st.title("📚 AI Chat from Your PDFs (Preprocessed & OCR‑enabled)")
+st.title("📚 AI Chat from Your PDFs (OCR‑enabled)")
 
-# --- LOAD VECTORSTORE FROM DISK ---
-@st.cache_resource(show_spinner="Loading preprocessed documents...")
-def load_vectorstore():
-    with open("vectorstore.pkl", "rb") as f:
-        return pickle.load(f)
+# --- LOAD VECTORSTORE ---
+@st.cache_resource(show_spinner=True)
+def load_vectorstore(path):
+    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    return FAISS.load_local(path, embeddings)
 
-vectorstore = load_vectorstore()
+vectorstore = load_vectorstore(VECTORSTORE_PATH)
 if not vectorstore:
-    st.error("Failed to load preprocessed vectorstore.")
+    st.error("Failed to load vectorstore.")
     st.stop()
 
+# --- INIT QA CHAIN ---
 qa = RetrievalQA.from_chain_type(
     llm=ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY),
     retriever=vectorstore.as_retriever(),
@@ -61,7 +57,7 @@ if query:
         srcs = res.get("source_documents", [])
         st.session_state.history.append((query, ans, srcs))
 
-# --- SHOW CHAT ---
+# --- SHOW CHAT HISTORY ---
 for q, ans, sources in st.session_state.history:
     st.markdown(f"<div class='chat-user'><b>You:</b> {q}</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='chat-ai'><b>AI:</b> {ans}</div>", unsafe_allow_html=True)
@@ -72,3 +68,4 @@ for q, ans, sources in st.session_state.history:
 if st.button("Clear Chat"):
     st.session_state.history = []
     st.experimental_rerun()
+
