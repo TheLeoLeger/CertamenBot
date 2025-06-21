@@ -119,6 +119,5 @@ def main():
     vectorstore.save_local(VECTORSTORE_SAVE_PATH)
     print("Preprocessing complete.")
     
-vectorstore.save_local("faiss_index")
 if __name__ == "__main__":
     main()
