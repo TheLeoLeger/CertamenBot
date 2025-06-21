@@ -27,7 +27,7 @@ PDF_FOLDER_ID = os.getenv("PDF_FOLDER_ID")
 
 if not OPENAI_API_KEY:
     st.error("❌ OPENAI_API_KEY is not set.")
-if not GOOGLE_CREDS_JSON:
+if not GOOGLE_CREDS
     st.error("❌ GOOGLE_CREDS is not set.")
 if not PDF_FOLDER_ID:
     st.error("❌ PDF_FOLDER_ID is not set.")
