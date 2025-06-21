@@ -12,6 +12,9 @@ VECTORSTORE_PATH = os.getenv("VECTORSTORE_PATH")  # path to saved FAISS index fo
 
 if not VECTORSTORE_PATH:
     st.error("❌ VECTORSTORE_PATH is not set.")
+    
+if not OPENAI_API_KEY:
+    st.error("❌ OPENAI_API_KEY is not set. The ChatOpenAI model will not work.")
 
 # --- PAGE CONFIG & STYLING ---
 st.set_page_config(page_title="📚 PDF AI Chat", layout="wide")
