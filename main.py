@@ -4,14 +4,12 @@ import streamlit as st
 from langchain.chains import RetrievalQA
 from langchain.chat_models import ChatOpenAI
 from langchain.vectorstores import FAISS
-from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.embeddings import HuggingFaceEmbeddings  # changed import
 
 # --- ENVIRONMENT VARIABLES ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 VECTORSTORE_PATH = os.getenv("VECTORSTORE_PATH")  # path to saved FAISS index folder
 
-if not OPENAI_API_KEY:
-    st.error("❌ OPENAI_API_KEY is not set.")
 if not VECTORSTORE_PATH:
     st.error("❌ VECTORSTORE_PATH is not set.")
 
@@ -34,7 +32,7 @@ def load_vectorstore(path):
     if not os.path.exists(path):
         st.error(f"Vectorstore path not found: {path}")
         return None
-    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")  # changed here
     try:
         return FAISS.load_local(path, embeddings)
     except Exception as e:
@@ -47,7 +45,7 @@ if not vectorstore:
 
 # --- INIT QA CHAIN ---
 qa = RetrievalQA.from_chain_type(
-    llm=ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY),
+    llm=ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY),  # keep ChatOpenAI as LLM
     retriever=vectorstore.as_retriever(),
     return_source_documents=True,
 )
