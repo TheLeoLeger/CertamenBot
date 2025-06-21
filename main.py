@@ -1,36 +1,24 @@
 import os
 import streamlit as st
-from io import BytesIO
-
-# Google Drive
-import json
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
-
-# PDF & OCR
-import fitz  # PyMuPDF
-import pytesseract
+import pickle
 
 # LangChain
-from langchain.schema import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from langchain.chat_models import ChatOpenAI
+from langchain.vectorstores import FAISS
+from langchain.embeddings.openai import OpenAIEmbeddings
 
 # --- ENVIRONMENT VARIABLES ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GOOGLE_CREDS = os.getenv("GOOGLE_CREDS")
-PDF_FOLDER_ID = os.getenv("PDF_FOLDER_ID")
+GOOGLE_CREDS = os.getenv("GOOGLE_CREDS")  # Kept for compatibility
+PDF_FOLDER_ID = os.getenv("PDF_FOLDER_ID")  # Kept for compatibility
 
 if not OPENAI_API_KEY:
     st.error("❌ OPENAI_API_KEY is not set.")
 if not GOOGLE_CREDS:
-    st.error("❌ GOOGLE_CREDS is not set.")
+    st.warning("⚠️ GOOGLE_CREDS is not used in this version but still required.")
 if not PDF_FOLDER_ID:
-    st.error("❌ PDF_FOLDER_ID is not set.")
+    st.warning("⚠️ PDF_FOLDER_ID is not used in this version but still required.")
 
 # --- PAGE CONFIG & STYLING ---
 st.set_page_config(page_title="📚 PDF AI Chat", layout="wide")
@@ -42,91 +30,17 @@ st.markdown("""
     input, button { background: #222; color: white !important; }
     </style>
 """, unsafe_allow_html=True)
-st.title("📚 AI Chat from Your PDFs (OCR‑enabled)")
+st.title("📚 AI Chat from Your PDFs (Preprocessed & OCR‑enabled)")
 
-# --- GOOGLE DRIVE FUNCTIONS ---
-@st.cache_resource(show_spinner=False)
-def get_drive_service():
-    creds_info = json.loads(GOOGLE_CREDS)
-    creds = Credentials.from_service_account_info(
-        creds_info,
-        scopes=["https://www.googleapis.com/auth/drive.readonly"]
-    )
-    return build("drive", "v3", credentials=creds)
+# --- LOAD VECTORSTORE FROM DISK ---
+@st.cache_resource(show_spinner="Loading preprocessed documents...")
+def load_vectorstore():
+    with open("vectorstore.pkl", "rb") as f:
+        return pickle.load(f)
 
-@st.cache_data(show_spinner=True)
-def fetch_pdfs_from_drive(_service, folder_id):
-    results = _service.files().list(
-        q=f"'{folder_id}' in parents and mimeType='application/pdf' and trashed = false",
-        fields="files(id, name)",
-    ).execute()
-    files = results.get("files", [])
-    docs = []
-    downloader = MediaIoBaseDownload
-    for f in files:
-        fh = BytesIO()
-        req = _service.files().get_media(fileId=f["id"])
-        dl = downloader(fh, req)
-        done = False
-        while not done:
-            _, done = dl.next_chunk()
-        fh.seek(0)
-        docs.append((f["name"], fh.read()))
-    return docs
-
-# --- TEXT EXTRACTION WITH OCR FALLBACK ---
-def extract_text(pdf_bytes: bytes) -> str:
-    text = ""
-    try:
-        pdf = fitz.open(stream=pdf_bytes, filetype="pdf")
-        for page in pdf:
-            txt = page.get_text()
-            if txt and txt.strip():
-                text += txt + "\n"
-        if text.strip():
-            return text
-    except Exception:
-        pass
-
-    # OCR fallback
-    try:
-        pdf = fitz.open(stream=pdf_bytes, filetype="pdf")
-        for page in pdf:
-            pix = page.get_pixmap(dpi=300)
-            txt = pytesseract.image_to_string(pix.tobytes("png"))
-            text += txt + "\n"
-        return text
-    except Exception:
-        return text
-
-# --- BUILD VECTORSTORE ---
-@st.cache_resource(show_spinner=True)
-def build_vectorstore(pdf_list):
-    docs = []
-    for name, pdf in pdf_list:
-        txt = extract_text(pdf)
-        if not txt.strip():
-            st.warning(f"⚠️ No text extracted from {name}.")
-            continue
-        docs.append(Document(page_content=txt, metadata={"source": name}))
-    if not docs:
-        st.error("No valid documents to process.")
-        return None
-
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = splitter.split_documents(docs)
-    emb = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-    return FAISS.from_documents(chunks, emb)
-
-# --- INITIALIZE ---
-service = get_drive_service()
-pdf_files = fetch_pdfs_from_drive(service, PDF_FOLDER_ID)
-if not pdf_files:
-    st.error("No PDFs found in your Drive folder.")
-    st.stop()
-
-vectorstore = build_vectorstore(pdf_files)
+vectorstore = load_vectorstore()
 if not vectorstore:
+    st.error("Failed to load preprocessed vectorstore.")
     st.stop()
 
 qa = RetrievalQA.from_chain_type(
